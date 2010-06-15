@@ -1,5 +1,4 @@
-# module Rasta
-
+module Rasta
 require 'strscan'
 
 # We are going to need a really flexible buffer implementation
@@ -10,12 +9,14 @@ require 'strscan'
 #   
 # end
 
-class Rule    
+class Rule
   def parse?(string)
+    run_parse(string) != nil
+  end
+  
+  def run_parse(string)
     ss  = StringScanner.new(string)
-    ret = self.parse(ss)
-    
-    # if ret && ret.eos? then true else false end
+    self.parse(ss)
   end
   
   # This function returns a piece of ast on success
@@ -46,7 +47,32 @@ class Rule
 end
 
 class Node
-
+  attr_accessor :value, :children
+  
+  def initialize(children, value = {})
+    @value    = value
+    @children = [children].flatten
+  end
+  
+  def inspect
+    print "\n-----\n"
+    pretty_print(0)
+    print "\n-----\n"
+  end
+  
+  def pretty_print(indent)
+    x = @value[:string] || @value[:rule]
+    
+    puts "#{"  "*indent}#{x}"
+    @children.each do |x|
+      if x.respond_to?(:pretty_print)
+        x.pretty_print(indent + 1)
+      elsif x
+        puts "#{"  "*(indent + 1)}#{x.inspect}"
+      end
+    end
+  end
+  
 end
 
 def has(rule)
@@ -71,20 +97,25 @@ class Terminal < Rule
     else
       s = nil
     end 
-      
-    # puts s
-    if s then buffer else nil end
+    
+    n = Node.new(nil, :string => s, :rule => self)
+    
+    if s then n else nil end
   end
 end
 
-def term(rule)
+def t(rule)
   Terminal.new(rule)
 end
 
-def BlockRule
+class BlockRule < Rule
   def initialize(&block)
     @block = block
   end
+  
+  def parse(buffer)
+    @block.call(buffer)
+  end  
 end
 
 # This is a special class that allows bindings wrangling
@@ -99,14 +130,7 @@ def ref(&block)
   RuleRef.new(&block)
 end
 
-# This is a wild rule
-class BlockRule < BlockRule
-  def parse(buffer)
-    @block.call(buffer)
-  end  
-end
-
-class MultiRule
+class MultiRule < Rule
   def initialize(*rules)
     @rules = rules.flatten
   end
@@ -115,9 +139,19 @@ end
 # Covers sequence rules
 class Sequence < MultiRule  
   def parse(buffer)
-    @rules.inject(true) do |a, x|
-      a = a && x.parse(buffer)
+    c = []
+    
+    @rules.each do |x|
+      n = x.parse(buffer)
+      
+      if n
+        c << n
+      else
+        return nil
+      end
     end
+    
+    Node.new(c, :rule => self)
   end
   
   def >>(rule)
@@ -139,9 +173,14 @@ end
 # Covers ordered choice rules
 class Choice < MultiRule  
   def parse(buffer)
-    @rules.inject(nil) do |a, x|
-      a = a || x.parse(buffer)
+    @rules.each do |x|
+      n = x.parse(buffer)
+      
+      # return Node.new(n, :rule => self) if n
+      return n if n
     end
+    
+    nil
   end
 end
 
@@ -159,18 +198,18 @@ class More < Rule
   
   def parse(buffer)
     pos = buffer.pos
-    count = 0
+    c = []
     
-    while @rule.parse(buffer)
-      count += 1
+    while n = @rule.parse(buffer)
+      c << n
       
-      if @max > 0 && count >= @max then
+      if @max > 0 && c.length >= @max then
         break
       end
     end
     
-    if count >= @min
-      buffer
+    if c.length >= @min
+      Node.new(c, :rule => self)
     else
       buffer.pos = pos
       nil
@@ -188,50 +227,14 @@ class Peek < Rule
   
   def parse(buffer)
     pos = buffer.pos
-    ret = @rule.parse(buffer)
+    n = @rule.parse(buffer)
     buffer.pos = pos
-    if (ret != nil) ^ @negate then
-      buffer
+    if (n != nil) ^ @negate then
+      Node.new(n, :rule => self)
     else
       nil
     end
   end
 end
 
-def test1
-  a = nil
-  b = nil
-  
-  ta = Terminal.new(/a/)
-  tb = Terminal.new(/b/)
-  tc = Terminal.new(/c/)
-
-  peek  = Peek.new(Sequence.new(RuleRef.new{a}, tc))
-  peek2 = Peek.new(Terminal.new(/[abc]/), true)
-  morea = More.new(ta, 1)
-  a = Sequence.new(ta, More.new(RuleRef.new{a}, 0, 1), tb)
-  b = Sequence.new(tb, More.new(RuleRef.new{b}, 0, 1), tc)
-
-  Sequence.new(peek, morea, RuleRef.new{b}, peek2)
-end
-
-def test2
-  a = nil
-  b = nil
-  
-  ta = term("a")
-  tb = term("b")
-  tc = term("c")
-  
-  peek  = has(ref{a} >> tc)
-  peek2 = has_not(term(/[abc]/))
-  
-  morea = ta.plus
-  
-  a = seq ta, ref{a}.opt, tb
-  b = seq tb, ref{b}.opt, tc
-  
-  seq peek, morea, ref{b}, peek2
-end
-
-# end
+end # module Rasta
