@@ -1,4 +1,5 @@
 module Rasta
+require 'builder'
 require 'strscan'
 
 # We are going to need a really flexible buffer implementation
@@ -10,27 +11,40 @@ require 'strscan'
 # end
 
 class Rule
-  def parse?(string)
-    run_parse(string) != nil
+  attr_accessor :debug
+  
+  def initialize
+    @debug = false
   end
   
-  def run_parse(string)
+  def parse?(string)
+    ss = StringScanner.new(string)
+    x = self.parse(ss, Builder.new)
+    
+    if @debug && x.class == Failure
+      p x
+    end
+    
+    x.class != Failure && ss.eos?
+  end
+  
+  def parse_str(string, builder = Builder.new)
     ss  = StringScanner.new(string)
-    self.parse(ss)
+    self.parse(ss, builder)
   end
   
   # This function returns a piece of ast on success
   # and nil on failure
-  def parse
+  def parse(buffer, builder)
     nil
   end
   
   def plus
-    More.new(self, 1, -1)
+    More.new(self, 1)
   end
   
   def star
-    More.new(self, 0, -1)
+    More.new(self, 0)
   end
   
   def opt
@@ -44,51 +58,29 @@ class Rule
   def |(rule)
     Choice.new(self, rule)
   end
+  
+  def fail(inner_failure, info = {})
+    Failure.new(inner_failure, info)
+  end
 end
 
-class Node
-  attr_accessor :value, :children
+class Failure
+  attr_reader :context
   
-  def initialize(children, value = {})
-    @value    = value
-    @children = [children].flatten
+  def initialize(inner_failure, info = {})
+    @context = Array.new
+    @context += inner_failure.context if inner_failure
+    @context << info
   end
-  
-  def inspect
-    print "\n-----\n"
-    pretty_print(0)
-    print "\n-----\n"
-  end
-  
-  def pretty_print(indent)
-    x = @value[:string] || @value[:rule]
-    
-    puts "#{"  "*indent}#{x}"
-    @children.each do |x|
-      if x.respond_to?(:pretty_print)
-        x.pretty_print(indent + 1)
-      elsif x
-        puts "#{"  "*(indent + 1)}#{x.inspect}"
-      end
-    end
-  end
-  
-end
-
-def has(rule)
-  Peek.new(rule)
-end
-
-def has_not(rule)
-  Peek.new(rule, true)
 end
 
 class Terminal < Rule
   def initialize(terminal)
+    super()
     @terminal = terminal
   end
 
-  def parse(buffer)
+  def parse(buffer, builder)
     if @terminal.class == Regexp then
       s = buffer.scan(@terminal)
     elsif @terminal == buffer.peek(@terminal.length)
@@ -98,9 +90,11 @@ class Terminal < Rule
       s = nil
     end 
     
-    n = Node.new(nil, :string => s, :rule => self)
-    
-    if s then n else nil end
+    if s
+      builder.node(self, nil, :string => s)
+    else
+      fail(nil, :rule => self)
+    end
   end
 end
 
@@ -110,19 +104,20 @@ end
 
 class BlockRule < Rule
   def initialize(&block)
+    super()
     @block = block
   end
   
-  def parse(buffer)
-    @block.call(buffer)
+  def parse(buffer, builder)
+    @block[buffer, builder]
   end  
 end
 
 # This is a special class that allows bindings wrangling
 class RuleRef < BlockRule
-  def parse(buffer)
+  def parse(buffer, builder)
     ref = @block.call
-    ref.parse(buffer)
+    ref.parse(buffer, builder)
   end  
 end
 
@@ -131,27 +126,30 @@ def ref(&block)
 end
 
 class MultiRule < Rule
+  attr_accessor :rules
+  
   def initialize(*rules)
+    super()
     @rules = rules.flatten
   end
 end
 
 # Covers sequence rules
 class Sequence < MultiRule  
-  def parse(buffer)
+  def parse(buffer, builder)
     c = []
     
     @rules.each do |x|
-      n = x.parse(buffer)
+      n = x.parse(buffer, builder)
       
-      if n
-        c << n
+      if n.class == Failure
+        return fail(n, :rule => self)
       else
-        return nil
+        c << n
       end
     end
     
-    Node.new(c, :rule => self)
+    builder.node(self, c)
   end
   
   def >>(rule)
@@ -171,16 +169,17 @@ end
 # end
 
 # Covers ordered choice rules
-class Choice < MultiRule  
-  def parse(buffer)
+class Choice < MultiRule
+  def parse(buffer, builder)
+    n = nil
+    
     @rules.each do |x|
-      n = x.parse(buffer)
+      n = x.parse(buffer, builder)
       
-      # return Node.new(n, :rule => self) if n
-      return n if n
+      return n if n.class != Failure
     end
     
-    nil
+    fail(n, :rule => self)
   end
 end
 
@@ -191,16 +190,17 @@ end
 # Covers zero-or-more, one-or-more and optional
 class More < Rule
   def initialize(rule, min = 0, max = -1)
+    super()
     @rule  = rule
     @min = min
     @max = max
   end
   
-  def parse(buffer)
+  def parse(buffer, builder)
     pos = buffer.pos
     c = []
     
-    while n = @rule.parse(buffer)
+    while (n = @rule.parse(buffer, builder)).class != Failure
       c << n
       
       if @max > 0 && c.length >= @max then
@@ -209,10 +209,10 @@ class More < Rule
     end
     
     if c.length >= @min
-      Node.new(c, :rule => self)
+      builder.node(self, c)
     else
       buffer.pos = pos
-      nil
+      fail(nil, :rule => self)
     end
   end
   
@@ -221,20 +221,29 @@ end
 # Covers and and not syntactic predicates
 class Peek < Rule
   def initialize(rule, negate = false)
+    super()
     @rule   = rule
     @negate = negate
   end
   
-  def parse(buffer)
+  def parse(buffer, builder)
     pos = buffer.pos
-    n = @rule.parse(buffer)
+    n = @rule.parse(buffer, builder)
     buffer.pos = pos
-    if (n != nil) ^ @negate then
-      Node.new(n, :rule => self)
+    if (n.class != Failure) ^ @negate then
+      builder.node(self)
     else
-      nil
+      fail(nil, :rule => self)
     end
   end
+end
+
+def has(rule)
+  Peek.new(rule)
+end
+
+def has_not(rule)
+  Peek.new(rule, true)
 end
 
 end # module Rasta

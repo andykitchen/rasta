@@ -18,7 +18,7 @@ include Rasta
     a = Sequence.new(ta, More.new(RuleRef.new{a}, 0, 1), tb)
     b = Sequence.new(tb, More.new(RuleRef.new{b}, 0, 1), tc)
 
-    Sequence.new(peek, morea, RuleRef.new{b}, peek2)
+    s = Sequence.new(peek, morea, RuleRef.new{b}, peek2)
   end
 
   def abc_grammar
@@ -72,9 +72,45 @@ include Rasta
   def test_sexp
     s = sexp_grammar
     
-    p(s.run_parse("((128 a2) abc)"))
+    p(s.run_parse("((128 a2) abc)", TreeBuilder.new))
     
     assert_equal(true,  s.parse?("((128 a2) abc)"))
     assert_equal(false, s.parse?("((a)"))
   end
+  
+  def sexp_grammar_plus
+    # def list(item, sep)
+    #   item >> 
+    # end
+    
+    sexp = nil
+    
+    ident  = (t(/[A-z]/) >> t(/[A-z0-9]/).star).mk_s
+    number = t(/[0-9]+/).mk_i
+    
+    atom   = ident | number
+    space  = t(/\s/).plus.drop
+    ospace = t(/\s/).star.drop
+    
+    rsexp = ref{sexp}
+    
+    inner = (rsexp >> (unbox(space >> rsexp)).star).flatten
+        
+    lparen = (t("(") >> ospace).drop
+    rparen = (ospace >> t(")")).drop
+    
+    sexp = unbox(lparen >> inner >> rparen) | atom
+    
+    sexp.mk_a
+  end
+  
+  def test_sexp_plus
+    s = sexp_grammar_plus
+    
+    p(s.run_parse("(a b c 1 2 3 (d e f) (123) (a (123) a) ((123)))"))
+    
+    assert_equal(true,  s.parse?("( ( 128 a2 ) abc)"))
+    assert_equal(false, s.parse?("((a)"))
+  end
+  
 end
