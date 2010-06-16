@@ -71,9 +71,7 @@ include Rasta
   
   def test_sexp
     s = sexp_grammar
-    
-    p(s.run_parse("((128 a2) abc)", TreeBuilder.new))
-    
+        
     assert_equal(true,  s.parse?("((128 a2) abc)"))
     assert_equal(false, s.parse?("((a)"))
   end
@@ -94,23 +92,95 @@ include Rasta
     
     rsexp = ref{sexp}
     
-    inner = (rsexp >> (unbox(space >> rsexp)).star).flatten
-        
+    inner = rsexp << (space >> rsexp).star.flat
+    
     lparen = (t("(") >> ospace).drop
     rparen = (ospace >> t(")")).drop
     
-    sexp = unbox(lparen >> inner >> rparen) | atom
-    
-    sexp.mk_a
+    sexp = lparen << inner >> rparen | atom
   end
   
   def test_sexp_plus
     s = sexp_grammar_plus
     
-    p(s.run_parse("(a b c 1 2 3 (d e f) (123) (a (123) a) ((123)))"))
+    str = "(abc 1 2 3 (d e f) (123) (a (123) a) ((123)))"
+    
+    ls = ["abc", 1, 2, 3, ["d", "e", "f"], [123],
+         ["a", [123], "a"], [[123]]]
+    
+    # p s.parse_str(str, TreeBuilder.new)
+    
+    assert_equal(ls, s.parse_str(str, ArrayBuilder.new))
     
     assert_equal(true,  s.parse?("( ( 128 a2 ) abc)"))
     assert_equal(false, s.parse?("((a)"))
+  end
+  
+  def arith_grammar
+    exp  = nil
+    sum  = nil
+    rexp = ref{sum}
+    
+    value   = t(/[0-9\.]+/).mk_i | t("(") >> rexp >> t(")")
+    factor  = value  >> ((t("*") | t("/")) >> value).star
+    sum     = seq(factor) >> ((t("+") | t("-")) >> factor).star
+    
+    exp     = sum
+    
+  end
+  
+  def arith_grammar_plus    
+    exp  = nil
+    sum  = nil
+    fac  = nil
+
+    def infix(rule, sym)
+      BoxAction.new(rule, sym).flat
+    end
+
+    num = t(/[0-9]+/)
+    enc = t("(").drop >> ref{exp} >> t(")").drop
+    enc.trans = true
+    grp = enc | num
+    
+    mul = grp >> t("*").drop >> ref{fac}
+    mul.name = "rule:mul"
+    
+    div = grp >> t("/").drop >> ref{fac}
+    div.name = "rule:div"    
+    
+    fac = infix(mul, :*) | infix(div, :/) | grp
+
+    add = fac >> t("+").drop >> ref{sum}
+    add.name = "rule:add"
+    
+    sub = fac >> t("-").drop >> ref{sum}
+    sub.name = "rule:sub"
+    
+    sum = infix(add, :+) | infix(sub, :-) | fac
+
+    exp = sum
+    
+    # p exp
+
+    exp
+  end
+  
+  $arith_str = "1+2*3*10+4"
+  
+  def test_arith
+    s = arith_grammar
+    
+    # s.parse_str($arith_str*1000, TreeBuilder.new)
+    
+    assert_equal(true,  s.parse?("1+2*3/4-1+(2*3)"))
+    assert_equal(false, s.parse?("1++3-()"))
+  end
+  
+  def test_arith_plus
+    s = arith_grammar_plus
+    
+    p s.parse_str($arith_str, TreeBuilder.new)
   end
   
 end

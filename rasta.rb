@@ -11,10 +11,16 @@ require 'strscan'
 # end
 
 class Rule
-  attr_accessor :debug
+  attr_accessor :name, :debug
   
   def initialize
     @debug = false
+  end
+  
+  alias :old_to_s :to_s
+  
+  def to_s
+    @name || old_to_s
   end
   
   def parse?(string)
@@ -34,7 +40,8 @@ class Rule
   end
   
   # This function returns a piece of ast on success
-  # and nil on failure
+  # or a Failure object, nil means this rule doesn't
+  # generate any AST
   def parse(buffer, builder)
     nil
   end
@@ -52,15 +59,21 @@ class Rule
   end
   
   def >>(rule)
-    Sequence.new(self, rule)
+    s = Sequence.new(self)
+    s >> rule
+  end
+  
+  def <<(rule)
+    s = Sequence.new(self)
+    s << rule
   end
   
   def |(rule)
     Choice.new(self, rule)
   end
   
-  def fail(inner_failure, info = {})
-    Failure.new(inner_failure, info)
+  def fail(rule, inner_failure = nil, info = {})
+    Failure.new(inner_failure, info.merge(:rule => rule))
   end
 end
 
@@ -71,6 +84,11 @@ class Failure
     @context = Array.new
     @context += inner_failure.context if inner_failure
     @context << info
+  end
+  
+  def inspect
+    "Parse Failure:\n" +
+    @context.join("\n")
   end
 end
 
@@ -93,7 +111,7 @@ class Terminal < Rule
     if s
       builder.node(self, nil, :string => s)
     else
-      fail(nil, :rule => self)
+      fail(self)
     end
   end
 end
@@ -135,7 +153,16 @@ class MultiRule < Rule
 end
 
 # Covers sequence rules
-class Sequence < MultiRule  
+class Sequence < MultiRule
+  # TODO Sequences seem to know too much now
+  attr_reader   :flattens
+  attr_accessor :trans
+  
+  def initialize(*rules)
+    super
+    @flattens = {}
+  end
+  
   def parse(buffer, builder)
     c = []
     
@@ -143,17 +170,48 @@ class Sequence < MultiRule
       n = x.parse(buffer, builder)
       
       if n.class == Failure
-        return fail(n, :rule => self)
+        return fail(self, n)
       else
-        c << n
+        if @flattens[x] then
+          # TODO find a more elegant way to do this
+          if n.class == Array then
+            c += n
+          elsif n.respond_to?(:children)
+            c += n.children
+          end
+          
+          # TODO throw an error or something here
+        else
+          c << n
+        end
       end
     end
     
-    builder.node(self, c)
+    c.compact!
+    
+    if @trans && c.length == 1
+      c[0]
+    else
+      builder.node(self, c)
+    end
   end
-  
+    
   def >>(rule)
     @rules << rule
+    
+    self
+  end
+  
+  def <<(rule)
+    # TODO Merge new rules
+    if rule.class == Sequence
+      @rules = @rules + rule.rules
+      @flattens.merge!(rule.flattens)
+    else
+      @rules << rule
+      @flattens[rule] = true
+    end
+    
     self
   end
 end
@@ -174,12 +232,17 @@ class Choice < MultiRule
     n = nil
     
     @rules.each do |x|
+      pos = buffer.pos
       n = x.parse(buffer, builder)
       
-      return n if n.class != Failure
+      if n.class != Failure
+        return n
+      else
+        buffer.pos = pos
+      end
     end
     
-    fail(n, :rule => self)
+    fail(self, n)
   end
 end
 
@@ -209,10 +272,11 @@ class More < Rule
     end
     
     if c.length >= @min
+      c.compact!
       builder.node(self, c)
     else
       buffer.pos = pos
-      fail(nil, :rule => self)
+      fail(self)
     end
   end
   
@@ -233,7 +297,7 @@ class Peek < Rule
     if (n.class != Failure) ^ @negate then
       builder.node(self)
     else
-      fail(nil, :rule => self)
+      fail(self)
     end
   end
 end
