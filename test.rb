@@ -171,7 +171,7 @@ include Rasta
   def test_arith
     s = arith_grammar
     
-    # s.parse_str($arith_str*1000, TreeBuilder.new)
+    s.parse_str($arith_str*1000, TreeBuilder.new)
     
     assert_equal(true,  s.parse?("1+2*3/4-1+(2*3)"))
     assert_equal(false, s.parse?("1++3-()"))
@@ -180,7 +180,7 @@ include Rasta
   def test_arith_plus
     s = arith_grammar_plus
     
-    p s.parse_str($arith_str, TreeBuilder.new)
+    p s.parse_str($arith_str*100, TreeBuilder.new)
   end
   
 end

@@ -1,5 +1,6 @@
 module Rasta
 require 'builder'
+require 'action'
 require 'strscan'
 
 # We are going to need a really flexible buffer implementation
@@ -11,10 +12,17 @@ require 'strscan'
 # end
 
 class Rule
+  @@Memo  = false
+  @@cache = Hash.new
+  
   attr_accessor :name, :debug
   
   def initialize
     @debug = false
+  end
+  
+  def self.clear_cache
+    @@cache = Hash.new
   end
   
   alias :old_to_s :to_s
@@ -38,12 +46,31 @@ class Rule
     ss  = StringScanner.new(string)
     self.parse(ss, builder)
   end
-  
+    
   # This function returns a piece of ast on success
   # or a Failure object, nil means this rule doesn't
   # generate any AST
-  def parse(buffer, builder)
+  def do_parse(buffer, builder)
     nil
+  end
+  
+  # This is the entry point for parsing
+  # memoisation happens here.
+  if @@Memo  
+    def parse(buffer, builder)    
+      ident = [buffer, buffer.pos, self]
+
+      if m = @@cache[ident]
+        buffer.pos = m[1]
+        return m[0]
+      else
+        return (@@cache[ident] = [do_parse(buffer, builder), buffer.pos])[0]
+      end
+    end
+  else
+    def parse(*args)
+      do_parse(*args)
+    end
   end
   
   def plus
@@ -98,7 +125,7 @@ class Terminal < Rule
     @terminal = terminal
   end
 
-  def parse(buffer, builder)
+  def do_parse(buffer, builder)
     if @terminal.class == Regexp then
       s = buffer.scan(@terminal)
     elsif @terminal == buffer.peek(@terminal.length)
@@ -126,14 +153,14 @@ class BlockRule < Rule
     @block = block
   end
   
-  def parse(buffer, builder)
+  def do_parse(buffer, builder)
     @block[buffer, builder]
   end  
 end
 
 # This is a special class that allows bindings wrangling
 class RuleRef < BlockRule
-  def parse(buffer, builder)
+  def do_parse(buffer, builder)
     ref = @block.call
     ref.parse(buffer, builder)
   end  
@@ -163,7 +190,7 @@ class Sequence < MultiRule
     @flattens = {}
   end
   
-  def parse(buffer, builder)
+  def do_parse(buffer, builder)
     c = []
     
     @rules.each do |x|
@@ -228,7 +255,7 @@ end
 
 # Covers ordered choice rules
 class Choice < MultiRule
-  def parse(buffer, builder)
+  def do_parse(buffer, builder)
     n = nil
     
     @rules.each do |x|
@@ -259,7 +286,7 @@ class More < Rule
     @max = max
   end
   
-  def parse(buffer, builder)
+  def do_parse(buffer, builder)
     pos = buffer.pos
     c = []
     
@@ -290,12 +317,12 @@ class Peek < Rule
     @negate = negate
   end
   
-  def parse(buffer, builder)
+  def do_parse(buffer, builder)
     pos = buffer.pos
     n = @rule.parse(buffer, builder)
     buffer.pos = pos
     if (n.class != Failure) ^ @negate then
-      builder.node(self)
+      nil
     else
       fail(self)
     end

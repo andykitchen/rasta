@@ -21,18 +21,6 @@ class Rule
     Rasta::flat(self >> (sep.drop >> self).unbox.star)
   end
   
-  def unbox
-    UnboxAction.new(self)
-  end
-  
-  def box(box = nil)
-    BoxAction.new(self, box)
-  end
-  
-  def flat
-    FlattenAction.new(self)
-  end
-  
 end
 
 class Builder < Rule
@@ -51,9 +39,13 @@ class Builder < Rule
 end
 
 class Node
+  # @@count = 0
+    
   attr_accessor :value, :children
   
   def initialize(children = nil, value = {})
+    # puts "built node: #{@@count += 1}"
+    
     @value    = value
     @children = children
   end
@@ -153,66 +145,11 @@ class IntegerBuilder < Builder
     
     if str
       str.to_i
-    elsif children
-      children.join
+    else 
+      0
     end
   end
 
-end
-
-class Action < Rule
-  def initialize(rule)
-    @rule = rule
-  end
-  
-  def parse(buffer, builder)
-    n = @rule.parse(buffer, builder)
-    if n.class == Failure
-       n
-    else
-       self.run_action(n, builder)
-    end
-  end
-  
-end
-
-class FlattenAction < Action
-  def run_action(node, builder)
-    if node.respond_to?(:flatten) then
-      node.flatten(1)
-    end
-  end
-
-end
-
-def flat(rule)
-  FlattenAction.new(rule)
-end
-
-class UnboxAction < Action
-  def run_action(node, builder)
-    n[0]
-  end
-end
-
-def unbox(rule)
-  UnboxAction.new(rule)
-end
-
-class BoxAction < Action
-  def initialize(rule, box = nil)
-    super(rule)
-    @box = box
-  end
-
-  def run_action(node, builder)
-    builder.node(@box || self, [node])
-  end
-
-end
-
-def box(rule, box = nil)
-  BoxAction.new(rule, box)
 end
 
 end # module Rasta
