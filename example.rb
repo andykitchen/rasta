@@ -13,6 +13,19 @@ def list1
   list   = l >> atom >> (sep >> atom).star >> r
 end
 
+def list2
+  number = t(/[0-9]+/)
+  word   = t(/[A-Za-z]+/)
+  
+  atom   = number | word
+  
+  l      = t("[")
+  r      = t("]")
+  sep    = t(",")
+  
+  list   = l >> ref{list} >> (sep >> ref{list}).star >> r
+end
+
 def listx
   list   = nil
   
