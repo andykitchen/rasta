@@ -1,6 +1,4 @@
 module Rasta
-require 'builder'
-require 'action'
 require 'strscan'
 
 # We are going to need a really flexible buffer implementation
@@ -11,26 +9,15 @@ require 'strscan'
 #   
 # end
 
+def Builder; end
+
 class Rule
-  @@Memo  = false
-  @@cache = Hash.new
-  
-  attr_accessor :name, :debug
-  
+  attr_accessor :name
+    
   def initialize
     @debug = false
   end
-  
-  def self.clear_cache
-    @@cache = Hash.new
-  end
-  
-  alias :old_to_s :to_s
-  
-  def to_s
-    @name || old_to_s
-  end
-  
+      
   def parse?(string)
     ss = StringScanner.new(string)
     x = self.parse(ss, Builder.new)
@@ -50,29 +37,10 @@ class Rule
   # This function returns a piece of ast on success
   # or a Failure object, nil means this rule doesn't
   # generate any AST
-  def do_parse(buffer, builder)
+  def parse(buffer, builder)
     nil
   end
-  
-  # This is the entry point for parsing
-  # memoisation happens here.
-  if @@Memo  
-    def parse(buffer, builder)    
-      ident = [buffer, buffer.pos, self]
-
-      if m = @@cache[ident]
-        buffer.pos = m[1]
-        return m[0]
-      else
-        return (@@cache[ident] = [do_parse(buffer, builder), buffer.pos])[0]
-      end
-    end
-  else
-    def parse(*args)
-      do_parse(*args)
-    end
-  end
-  
+    
   def plus
     More.new(self, 1)
   end
@@ -122,6 +90,9 @@ end
 class Terminal < Rule
   def initialize(terminal)
     super()
+    
+    self.name = terminal.inspect
+    
     if terminal.class == String
       @terminal = /#{Regexp.quote(terminal)}/
     else
@@ -130,13 +101,14 @@ class Terminal < Rule
     
   end
 
-  def do_parse(buffer, builder)
+  def parse(buffer, builder)
     if s = buffer.scan(@terminal)
       builder.node(self, nil, :string => s)
     else
       fail(self)
     end
   end
+  
 end
 
 def t(rule)
@@ -149,14 +121,14 @@ class BlockRule < Rule
     @block = block
   end
   
-  def do_parse(buffer, builder)
+  def parse(buffer, builder)
     @block[buffer, builder]
   end  
 end
 
 # This is a special class that allows bindings wrangling
 class RuleRef < BlockRule
-  def do_parse(buffer, builder)
+  def parse(buffer, builder)
     ref = @block.call
     ref.parse(buffer, builder)
   end  
@@ -186,10 +158,10 @@ class Sequence < MultiRule
     @flattens = {}
   end
   
-  def do_parse(buffer, builder)
+  def parse(buffer, builder)
     c = []
     
-    @rules.each do |x|
+    for x in @rules
       n = x.parse(buffer, builder)
       
       if n.class == Failure
@@ -226,7 +198,6 @@ class Sequence < MultiRule
   end
   
   def <<(rule)
-    # TODO Merge new rules
     if rule.class == Sequence
       @rules = @rules + rule.rules
       @flattens.merge!(rule.flattens)
@@ -251,10 +222,10 @@ end
 
 # Covers ordered choice rules
 class Choice < MultiRule
-  def do_parse(buffer, builder)
+  def parse(buffer, builder)
     n = nil
     
-    @rules.each do |x|
+    for x in @rules
       pos = buffer.pos
       n = x.parse(buffer, builder)
       
@@ -267,6 +238,12 @@ class Choice < MultiRule
     
     fail(self, n)
   end
+  
+  def |(rule)
+    @rules << rule
+    
+    self
+  end
 end
 
 def choose(*rules)
@@ -277,12 +254,12 @@ end
 class More < Rule
   def initialize(rule, min = 0, max = -1)
     super()
-    @rule  = rule
+    @rule = rule
     @min = min
     @max = max
   end
   
-  def do_parse(buffer, builder)
+  def parse(buffer, builder)
     pos = buffer.pos
     c = []
     
@@ -313,7 +290,7 @@ class Peek < Rule
     @negate = negate
   end
   
-  def do_parse(buffer, builder)
+  def parse(buffer, builder)
     pos = buffer.pos
     n = @rule.parse(buffer, builder)
     buffer.pos = pos
@@ -332,5 +309,9 @@ end
 def has_not(rule)
   Peek.new(rule, true)
 end
+
+require 'builder'
+require 'action'
+require 'inspect'
 
 end # module Rasta

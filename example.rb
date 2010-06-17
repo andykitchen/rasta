@@ -1,3 +1,5 @@
+require 'rasta'
+
 include Rasta
 
 def list1
@@ -10,7 +12,7 @@ def list1
   r      = t("]")
   sep    = t(",")
   
-  list   = l >> atom >> (sep >> atom).star >> r
+  list   = l >> atom >> (sep >> atom).star >> r  
 end
 
 def list2
@@ -38,7 +40,13 @@ def listx
   r      = t("]").drop
   sep    = t(",").drop
 
-  ref    = ref{list}
+  lref   = ref{list}
 
-  list   = l >> ref << (sep >> ref).star.flat >> r | atom
+  list   = l >> lref << (sep >> lref).star.flat >> r | atom
+  
+  atom.name = "atom"
+  number.name = "number"
+  list.name = "list"
+  
+  list
 end
