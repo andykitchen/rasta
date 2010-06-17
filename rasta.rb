@@ -41,7 +41,7 @@ class Rule
     
     x.class != Failure && ss.eos?
   end
-  
+
   def parse_str(string, builder = Builder.new)
     ss  = StringScanner.new(string)
     self.parse(ss, builder)
@@ -122,20 +122,16 @@ end
 class Terminal < Rule
   def initialize(terminal)
     super()
-    @terminal = terminal
+    if terminal.class == String
+      @terminal = /#{Regexp.quote(terminal)}/
+    else
+      @terminal = terminal
+    end
+    
   end
 
   def do_parse(buffer, builder)
-    if @terminal.class == Regexp then
-      s = buffer.scan(@terminal)
-    elsif @terminal == buffer.peek(@terminal.length)
-      s = @terminal
-      buffer.pos += @terminal.length
-    else
-      s = nil
-    end 
-    
-    if s
+    if s = buffer.scan(@terminal)
       builder.node(self, nil, :string => s)
     else
       fail(self)

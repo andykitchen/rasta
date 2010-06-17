@@ -128,9 +128,7 @@ end
 
 class StringBuilder < Builder  
   def node(rule, children = nil, value = {})
-    str = value[:string]
-    
-    if str
+    if str = value[:string]
       str
     elsif children
       children.join
@@ -141,11 +139,9 @@ end
 
 class IntegerBuilder < Builder  
   def node(rule, children = nil, value = {})
-    str = value[:string]
-    
-    if str
+    if str = value[:string]
       str.to_i
-    else 
+    else
       0
     end
   end

@@ -14,7 +14,7 @@ def list1
 end
 
 def listx
-  list = nil
+  list   = nil
   
   number = t(/[0-9]+/).mk_i
   word   = t(/[A-Za-z]+/).mk_s
